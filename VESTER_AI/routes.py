@@ -1,8 +1,9 @@
 from VESTER_AI import app
 from flask import request, jsonify
 import os
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader, DocumentInformation
 import pprint
+from pptx import Presentation
 
 
 # Set the directory where uploaded files will be saved
@@ -16,7 +17,7 @@ if not os.path.exists(UPLOAD_FOLDER):
 
 # Allowed extensions
 ALLOWED_EXTENSIONS = {'pdf', 'ppt', 'pptx'}
-ALLOWED_MIME_TYPES = {'application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'}
+ALLOWED_MIME_TYPES = {'application/pdf', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', "application/octet-stream"}
 
 def allowed_file(filename, file):
     # Check file extension
@@ -59,35 +60,63 @@ def upload_file():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
         file.save(file_path)
 
-        try:
-            # for pdf
-            reader = PdfReader(file.filename)
-            meta = reader.metadata
+        if file.mimetype == "application/pdf":
+            # to handle for PDFs only
+            try:
+                # for pdf
+                reader = PdfReader(file.filename)
+                meta = reader.metadata
 
-            number_of_pages = len(reader.pages)
-            texts = {}
+                number_of_pages = len(reader.pages)
+                texts = {}
 
-            for i in range(1, number_of_pages):
-                page = reader.pages[i]
-                text = page.extract_text()
-                texts[i] = text
-        except Exception as e:
-            raise
-            return str(e)
+                for i in range(1, number_of_pages):
+                    page = reader.pages[i]
+                    text = page.extract_text()
+                    texts[i] = text
+            except Exception as e:
+                return jsonify({
+                        "statusCode": 400,
+                        "err": str(e)
+                })
 
-        pprint.pprint(texts)
-        return jsonify({
-            "statusCode": 200,
-            "message": "File successfully uploaded",
-            "working_dir": os.getcwd(),
-            "file_path": file_path,
-            "file_name": file.filename,
-            "reader": {
-                "number_of_pages": number_of_pages,
-                "title": meta.title,
-                # "texts": texts
+            pprint.pprint(texts) # Will save to db
+            return jsonify({
+                "statusCode": 200,
+                "message": "File successfully uploaded",
+                "working_dir": os.getcwd(),
+                "file_path": file_path,
+                "file_name": file.filename,
+                "file_type": file.mimetype,
+                "file"
+                "reader": {
+                    "title": meta.title,
+                    "author": meta.author,
+                    "number_of_pages": number_of_pages
+                }
+            })
+        elif file.mimetype in [
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/octet-stream"
+        ]:
+            # Too handle for powerpoint files.
+            _path = os.getcwd() + "/" + file_path
+            # return _path
+            prs = Presentation(_path)
+
+            for slide_number, slide in enumerate(prs.slides):
+                print(f"Slide {slide_number + 1}:")
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        print(shape.text)
+
+            return {
+                "statusCode": 200,
+                "file_name": file.filename,
+                "file_path": _path,
+                "file_type": file.mimetype
             }
-        })
     else:
         return jsonify({"error": "Invalid file type. Only PDF and PowerPoint files are allowed."}), 400
 
